@@ -1,0 +1,348 @@
+---
+title: "Bioinformatics data skills workshop - Session 1: getting started on the Linux command line"
+author: "Burnet Bioinformatics Group"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    theme: simplex
+    toc: true
+    code_folding: hide
+    fig_width: 7
+    fig_height: 7
+    toc_float:
+      collapsed: true
+---
+
+Source: TBA
+
+## Introduction
+
+Dual RNA-seq of Aedes aegypti infected with different Wolbachia strains which provide different levels of antiviral action.
+
+Sample groups:
+
+* Tet: this is the non-infected control
+
+* wPip: no antiviral action
+
+* wMel: antiviral
+
+* wAlb: antiviral
+
+```{r,libs}
+
+library("RColorBrewer")
+library("DESeq2")
+library("beeswarm")
+library("gplots")
+library("kableExtra")
+library("mitch")
+library("fgsea")
+
+```
+
+## Load data
+
+Load in sample sheet and expression counts.
+
+```{r,loaddata}
+
+ss <- read.table("samplesheet.tsv",header=TRUE)
+
+ss$SampleGroup <- sapply(strsplit(ss$Original_ID,"_"),"[[",1)
+
+ss$Batch <- sapply(strsplit(unlist(sapply(strsplit(ss$Original_ID,"_"),"[[",2)),"-"),"[[",1)
+
+ss
+
+x <- read.csv("merged_gene_count_matrix.csv",header=TRUE, row.names=1)
+
+head(x)
+
+```
+
+## Fix the colnames
+
+This allows us to correct batches better.
+
+```{r,colnames1}
+
+colnames(x) <- ss$Original_ID[match(colnames(x), ss$Generic_ID_in_R)]
+
+head(x)
+
+```
+
+## Quality control
+
+Check depth.
+
+```{r,qc1}
+
+
+colSums(x)
+
+par(mar=c(5.1, 8.1, 4.1, 2.1))
+
+barplot(colSums(x),horiz=TRUE,las=1)
+
+par(mar=c(5.1, 4.1, 4.1, 2.1))
+
+```
+
+## Colours
+
+```{r,cols1}
+
+brewer.pal(n = 12, name = "Paired")
+
+display.brewer.pal(n = 12, name = "Paired")
+
+```
+
+## PCA
+
+```{r,mds1}
+
+mds <- cmdscale(dist(t(x)))
+
+par(mar=c(5,5,3,1))
+minx <- min(mds[,1])
+maxx <- max(mds[,1])
+miny <- min(mds[,2])
+maxy <- max(mds[,2])
+
+#tet #A6CEE3
+#pip #B2DF8A
+#wmel #FB9A99
+#walb #FDBF6F
+cols <- gsub("wAlb", "#FDBF6F ", gsub("wMel", "#FB9A99 ", gsub("wPip", "#B2DF8A ",  gsub("Tet","#A6CEE3 ",colnames(x)) ) ) )
+
+cols <- sapply(strsplit(cols," "),"[[",1)
+
+plot(mds, xlab="Coordinate 1", ylab="Coordinate 2",
+  xlim=c(minx*1.1,maxx*1.1), ylim = c(miny*1.1,maxy*1.1) , main="MDS plot",
+  type = "p", col=cols, pch=19, cex.axis=1.3, cex.lab=1.3, bty='n', cex=2)
+text(mds, labels=rownames(mds), cex=1.2)
+
+```
+
+## Differential analysis
+
+Here we'll make the following comparisons:
+
+1. Tet (ctrl) vs wPip (trt): effect of infection (no antiviral activity)
+
+2. Tet (ctrl) vs wMel (trt): effect of infection with an antiviral strain
+
+3. Tet (ctrl) vs wAlb (trt): effect of infection with an antiviral strain
+
+4. wPip (ctrl) vs wMel (trt): direct comparison of non-antiviral and antiviral
+
+5. wPip (ctrl) vs wAlb (trt): direct comparison of non-antiviral and antiviral
+
+```{r,plots}
+
+volcanoplot <- function(x,title) {
+  tot <- nrow(x)
+  sig <- subset(x,padj<0.01)
+  nsig <- nrow(subset(x,padj<0.01))
+  dn <- nrow(subset(x,padj<0.01 & log2FoldChange<0))
+  up <- nrow(subset(x,padj<0.01 & log2FoldChange>0))
+  header <- paste(title,":", tot, "genes,", nsig ,"@1% FDR,", up, "up,", dn, "dn")
+
+  plot(x$log2FoldChange,-log10(x$pvalue),bty="n",
+    cex=0.5, pch=19, xlab="log2 fold change",
+    ylab="-log10 p-value", main=header)
+
+  points(sig$log2FoldChange,-log10(sig$pvalue),
+    cex=0.5, pch=19, col="red")
+}
+
+smearplot <- function(x,title) {
+  tot <- nrow(x)
+  sig <- subset(x,padj<0.01)
+  nsig <- nrow(subset(x,padj<0.01))
+  dn <- nrow(subset(x,padj<0.01 & log2FoldChange<0))
+  up <- nrow(subset(x,padj<0.01 & log2FoldChange>0))
+  header <- paste(title,":", tot, "genes,", nsig ,"@1% FDR,", up, "up,", dn, "dn")
+
+  plot(log10(x$baseMean),x$log2FoldChange,bty="n",
+    cex=0.5, pch=19, xlab="log10 base mean",
+    ylab="log2 fold change", main=header)
+
+  points(log10(sig$baseMean),sig$log2FoldChange,
+    cex=0.5, pch=19, col="red")
+}
+
+# summarise a bunch of DE object results
+debar <- function(l) {
+  nn <- sapply(l,function(x) {
+    nup <- nrow(subset(x,padj<0.05 & log2FoldChange>0 ))
+    ndn <- nrow(subset(x,padj<0.05 & log2FoldChange<0 )) *-1
+    return(c(nup,ndn))
+  })
+  rownames(nn) <- c("up","dn")
+  par(mar = c(8.1, 4.1, 4.1, 2.1))
+  barplot(nn[1,],col="blue",beside = TRUE, border=TRUE,ylim=c(min(nn),max(nn)) , las=2)
+  barplot(nn[2,],add=TRUE,col="red",names.arg = "", ylab="", yaxt="n")
+  mtext("blue=up,red=down")
+  par(mar = c(5.1, 4.1, 4.1, 2.1))
+}
+
+```
+
+
+
+### DE1
+
+Effect of infection (no antiviral activity).
+
+```{r,de1}
+
+ss1 <- subset(ss,SampleGroup=="Tet"|SampleGroup=="wPip")
+batch_include <- names(which(table(unique(ss1[,3:4])$Batch)==2))
+ss1 <- ss1[which(ss1$Batch %in% batch_include),]
+ss1$trt <- grepl("wPip",ss1$SampleGroup)
+x1 <- x[,which(colnames(x) %in% ss1$Original_ID)]
+table(rowMeans(x1)>10)
+x1 <- x1[which(rowMeans(x1)>10),]
+dim(x1)
+
+mds <- cmdscale(dist(t(x1)))
+par(mar=c(5,5,3,1))
+minx <- min(mds[,1])
+maxx <- max(mds[,1])
+miny <- min(mds[,2])
+maxy <- max(mds[,2])
+cols <- gsub("wAlb", "#FDBF6F ", gsub("wMel", "#FB9A99 ", gsub("wPip", "#B2DF8A ",  gsub("Tet","#A6CEE3 ",colnames(x1)) ) ) )
+cols <- sapply(strsplit(cols," "),"[[",1)
+
+plot(mds, xlab="Coordinate 1", ylab="Coordinate 2",
+  xlim=c(minx*1.1,maxx*1.1), ylim = c(miny*1.1,maxy*1.1) , main="MDS plot",
+  type = "p", col=cols, pch=19, cex.axis=1.3, cex.lab=1.3, bty='n', cex=2)
+text(mds, labels=rownames(mds), cex=1.2)
+
+dds <- DESeqDataSetFromMatrix(countData = x1 , colData = ss1, design = ~ trt )
+res <- DESeq(dds)
+z <- results(res)
+vsd <- vst(dds, blind=FALSE)
+zz <- cbind(as.data.frame(z),assay(vsd))
+dge <- as.data.frame(zz[order(zz$pvalue),])
+table(is.na(dge$pvalue))
+dge <- dge[which(!is.na(dge$pvalue)),]
+dim(dge)
+
+head(dge[order(dge$pvalue),1:6],10) %>%
+  kbl(caption="Top DE genes for Pip infection") %>%
+  kable_paper("hover", full_width = F)
+
+volcanoplot(dge,"DGE1")
+
+smearplot(dge,"DGE1")
+
+dge1 <- dge
+
+```
+
+### DE2
+
+Tet (ctrl) vs wMel (trt): effect of infection with an antiviral strain
+
+```{r,de2}
+
+ss2 <- subset(ss,SampleGroup=="Tet"|SampleGroup=="wMel")
+batch_include <- names(which(table(unique(ss2[,3:4])$Batch)==2))
+ss2 <- ss2[which(ss2$Batch %in% batch_include),]
+ss2$trt <- grepl("wMel",ss2$SampleGroup)
+x2 <- x[,which(colnames(x) %in% ss2$Original_ID)]
+table(rowMeans(x2)>10)
+x2 <- x2[which(rowMeans(x2)>10),]
+dim(x2)
+
+mds <- cmdscale(dist(t(x2)))
+par(mar=c(5,5,3,1))
+minx <- min(mds[,1])
+maxx <- max(mds[,1])
+miny <- min(mds[,2])
+maxy <- max(mds[,2])
+cols <- gsub("wAlb", "#FDBF6F ", gsub("wMel", "#FB9A99 ", gsub("wPip", "#B2DF8A ",  gsub("Tet","#A6CEE3 ",colnames(x1)) ) ) )
+cols <- sapply(strsplit(cols," "),"[[",1)
+
+plot(mds, xlab="Coordinate 1", ylab="Coordinate 2",
+  xlim=c(minx*1.1,maxx*1.1), ylim = c(miny*1.1,maxy*1.1) , main="MDS plot",
+  type = "p", col=cols, pch=19, cex.axis=1.3, cex.lab=1.3, bty='n', cex=2)
+text(mds, labels=rownames(mds), cex=1.2)
+
+dds <- DESeqDataSetFromMatrix(countData = x2 , colData = ss2, design = ~ trt )
+res <- DESeq(dds)
+z <- results(res)
+vsd <- vst(dds, blind=FALSE)
+zz <- cbind(as.data.frame(z),assay(vsd))
+dge <- as.data.frame(zz[order(zz$pvalue),])
+table(is.na(dge$pvalue))
+dge <- dge[which(!is.na(dge$pvalue)),]
+dim(dge)
+
+head(dge[order(dge$pvalue),1:6],10) %>%
+  kbl(caption="Top DE genes for wMel infection") %>%
+  kable_paper("hover", full_width = F)
+
+volcanoplot(dge,"DGE2")
+
+smearplot(dge,"DGE2")
+
+dge2 <- dge
+
+```
+
+### DE3
+
+Tet (ctrl) vs wAlb (trt): effect of infection with an antiviral strain
+
+```{r,de3}
+
+ss3 <- subset(ss,SampleGroup=="Tet"|SampleGroup=="wAlb")
+batch_include <- names(which(table(unique(ss3[,3:4])$Batch)==2))
+ss3 <- ss3[which(ss3$Batch %in% batch_include),]
+ss3$trt <- grepl("wAlb",ss3$SampleGroup)
+x3 <- x[,which(colnames(x) %in% ss3$Original_ID)]
+table(rowMeans(x3)>10)
+x3 <- x3[which(rowMeans(x3)>10),]
+dim(x3)
+
+mds <- cmdscale(dist(t(x3)))
+par(mar=c(5,5,3,1))
+minx <- min(mds[,1])
+maxx <- max(mds[,1])
+miny <- min(mds[,2])
+maxy <- max(mds[,2])
+cols <- gsub("wAlb", "#FDBF6F ", gsub("wMel", "#FB9A99 ", gsub("wPip", "#B2DF8A ",  gsub("Tet","#A6CEE3 ",colnames(x1)) ) ) )
+cols <- sapply(strsplit(cols," "),"[[",1)
+
+plot(mds, xlab="Coordinate 1", ylab="Coordinate 2",
+  xlim=c(minx*1.1,maxx*1.1), ylim = c(miny*1.1,maxy*1.1) , main="MDS plot",
+  type = "p", col=cols, pch=19, cex.axis=1.3, cex.lab=1.3, bty='n', cex=2)
+text(mds, labels=rownames(mds), cex=1.2)
+
+dds <- DESeqDataSetFromMatrix(countData = x3 , colData = ss3, design = ~ trt )
+res <- DESeq(dds)
+z <- results(res)
+vsd <- vst(dds, blind=FALSE)
+zz <- cbind(as.data.frame(z),assay(vsd))
+dge <- as.data.frame(zz[order(zz$pvalue),])
+table(is.na(dge$pvalue))
+dge <- dge[which(!is.na(dge$pvalue)),]
+dim(dge)
+
+head(dge[order(dge$pvalue),1:6],10) %>%
+  kbl(caption="Top DE genes for wMel infection") %>%
+  kable_paper("hover", full_width = F)
+
+volcanoplot(dge,"DGE3")
+
+smearplot(dge,"DGE3")
+
+dge3 <- dge
+
+```
