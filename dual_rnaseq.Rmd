@@ -1,6 +1,6 @@
 ---
-title: "Bioinformatics data skills workshop - Session 1: getting started on the Linux command line"
-author: "Burnet Bioinformatics Group"
+title: "Dual RNA-seq impact of wolbachia infection on Aedes"
+author: "Fraser Lab and Burnet Bioinformatics Group"
 date: "`r Sys.Date()`"
 output:
   html_document:
@@ -38,6 +38,7 @@ library("gplots")
 library("kableExtra")
 library("mitch")
 library("fgsea")
+library("eulerr")
 
 ```
 
@@ -90,6 +91,42 @@ par(mar=c(5.1, 4.1, 4.1, 2.1))
 
 ```
 
+## Get gene annotations
+
+The following code was run to get the GO annotations.
+
+```
+python getannos.py --ids locs.txt --out go_annotations.csv
+```
+
+It mines Aedes data from this NCBI file: "https://ftp.ncbi.nlm.nih.gov/gene/DATA/gene2go.gz"
+which was obtained 1st Sept 2026.
+Coverage is OK, with 8950 genes having one or more GO annotations.
+But there are only 40,915 total annotations, so this is not comprehensive.
+Each gene has a median of 3 annotations.
+Each GO category has a median of 2 genes.
+
+```{r,gene_anno1}
+
+go <- read.csv("go_annotations.csv")
+head(go)
+summary(as.numeric(table(go$GO_ID)))
+hist(as.numeric(table(go$GO_ID)))
+
+go_sets <- lapply(unique(go$GO_ID),function(x) { go[which(go$GO_ID==x),"InputID"] } )
+
+names(go_sets) <- unlist(lapply(unique(go$GO_ID),function(x) {
+  goterm <- go[which(go$GO_ID==x)[1],"GO_term"]
+  qualifier <-  go[which(go$GO_ID==x)[1],"Qualifier"]
+  y <- paste(x,qualifier,goterm)
+  return(y)
+} ) )
+
+length(rownames(x))
+table(rownames(x) %in% go$InputID)
+
+```
+
 ## Colours
 
 ```{r,cols1}
@@ -124,6 +161,15 @@ plot(mds, xlab="Coordinate 1", ylab="Coordinate 2",
   xlim=c(minx*1.1,maxx*1.1), ylim = c(miny*1.1,maxy*1.1) , main="MDS plot",
   type = "p", col=cols, pch=19, cex.axis=1.3, cex.lab=1.3, bty='n', cex=2)
 text(mds, labels=rownames(mds), cex=1.2)
+
+```
+
+## Correlation analysis
+
+```{r,cor1}
+
+mycor <- cor(x)
+heatmap.2( mycor,scale="none", trace="none",margins = c(6,6), cexRow=1, main="Pearson Correlation")
 
 ```
 
@@ -191,8 +237,6 @@ debar <- function(l) {
 }
 
 ```
-
-
 
 ### DE1
 
@@ -266,7 +310,7 @@ minx <- min(mds[,1])
 maxx <- max(mds[,1])
 miny <- min(mds[,2])
 maxy <- max(mds[,2])
-cols <- gsub("wAlb", "#FDBF6F ", gsub("wMel", "#FB9A99 ", gsub("wPip", "#B2DF8A ",  gsub("Tet","#A6CEE3 ",colnames(x1)) ) ) )
+cols <- gsub("wAlb", "#FDBF6F ", gsub("wMel", "#FB9A99 ", gsub("wPip", "#B2DF8A ",  gsub("Tet","#A6CEE3 ",colnames(x2)) ) ) )
 cols <- sapply(strsplit(cols," "),"[[",1)
 
 plot(mds, xlab="Coordinate 1", ylab="Coordinate 2",
@@ -317,7 +361,7 @@ minx <- min(mds[,1])
 maxx <- max(mds[,1])
 miny <- min(mds[,2])
 maxy <- max(mds[,2])
-cols <- gsub("wAlb", "#FDBF6F ", gsub("wMel", "#FB9A99 ", gsub("wPip", "#B2DF8A ",  gsub("Tet","#A6CEE3 ",colnames(x1)) ) ) )
+cols <- gsub("wAlb", "#FDBF6F ", gsub("wMel", "#FB9A99 ", gsub("wPip", "#B2DF8A ",  gsub("Tet","#A6CEE3 ",colnames(x3)) ) ) )
 cols <- sapply(strsplit(cols," "),"[[",1)
 
 plot(mds, xlab="Coordinate 1", ylab="Coordinate 2",
@@ -344,5 +388,296 @@ volcanoplot(dge,"DGE3")
 smearplot(dge,"DGE3")
 
 dge3 <- dge
+
+```
+
+
+### DE4
+
+wPip (ctrl) vs wMel (trt): direct comparison of non-antiviral and antiviral
+
+```{r,de4}
+
+ss4 <- subset(ss,SampleGroup=="wPip"|SampleGroup=="wMel")
+batch_include <- names(which(table(unique(ss4[,3:4])$Batch)==2))
+ss4 <- ss4[which(ss4$Batch %in% batch_include),]
+ss4$trt <- grepl("wMel",ss4$SampleGroup)
+x4 <- x[,which(colnames(x) %in% ss4$Original_ID)]
+table(rowMeans(x4)>10)
+x4 <- x4[which(rowMeans(x4)>10),]
+dim(x4)
+
+mds <- cmdscale(dist(t(x4)))
+par(mar=c(5,5,3,1))
+minx <- min(mds[,1])
+maxx <- max(mds[,1])
+miny <- min(mds[,2])
+maxy <- max(mds[,2])
+cols <- gsub("wAlb", "#FDBF6F ", gsub("wMel", "#FB9A99 ", gsub("wPip", "#B2DF8A ",  gsub("Tet","#A6CEE3 ",colnames(x4)) ) ) )
+cols <- sapply(strsplit(cols," "),"[[",1)
+
+plot(mds, xlab="Coordinate 1", ylab="Coordinate 2",
+  xlim=c(minx*1.1,maxx*1.1), ylim = c(miny*1.1,maxy*1.1) , main="MDS plot",
+  type = "p", col=cols, pch=19, cex.axis=1.3, cex.lab=1.3, bty='n', cex=2)
+text(mds, labels=rownames(mds), cex=1.2)
+
+dds <- DESeqDataSetFromMatrix(countData = x4 , colData = ss4, design = ~ trt )
+res <- DESeq(dds)
+z <- results(res)
+vsd <- vst(dds, blind=FALSE)
+zz <- cbind(as.data.frame(z),assay(vsd))
+dge <- as.data.frame(zz[order(zz$pvalue),])
+table(is.na(dge$pvalue))
+dge <- dge[which(!is.na(dge$pvalue)),]
+dim(dge)
+
+head(dge[order(dge$pvalue),1:6],10) %>%
+  kbl(caption="Top DE genes for wMel infection") %>%
+  kable_paper("hover", full_width = F)
+
+volcanoplot(dge,"DGE4")
+
+smearplot(dge,"DGE4")
+
+dge4 <- dge
+
+```
+
+### DE5
+
+wPip (ctrl) vs wAlb (trt): direct comparison of non-antiviral and antiviral
+
+```{r,de5}
+
+ss5 <- subset(ss,SampleGroup=="wPip"|SampleGroup=="wAlb")
+batch_include <- names(which(table(unique(ss5[,3:4])$Batch)==2))
+ss5 <- ss5[which(ss5$Batch %in% batch_include),]
+ss5$trt <- grepl("wAlb",ss5$SampleGroup)
+x5 <- x[,which(colnames(x) %in% ss5$Original_ID)]
+table(rowMeans(x5)>10)
+x5 <- x5[which(rowMeans(x5)>10),]
+dim(x5)
+
+mds <- cmdscale(dist(t(x5)))
+par(mar=c(5,5,3,1))
+minx <- min(mds[,1])
+maxx <- max(mds[,1])
+miny <- min(mds[,2])
+maxy <- max(mds[,2])
+cols <- gsub("wAlb", "#FDBF6F ", gsub("wMel", "#FB9A99 ", gsub("wPip", "#B2DF8A ",  gsub("Tet","#A6CEE3 ",colnames(x5)) ) ) )
+cols <- sapply(strsplit(cols," "),"[[",1)
+
+plot(mds, xlab="Coordinate 1", ylab="Coordinate 2",
+  xlim=c(minx*1.1,maxx*1.1), ylim = c(miny*1.1,maxy*1.1) , main="MDS plot",
+  type = "p", col=cols, pch=19, cex.axis=1.3, cex.lab=1.3, bty='n', cex=2)
+text(mds, labels=rownames(mds), cex=1.2)
+
+dds <- DESeqDataSetFromMatrix(countData = x5 , colData = ss5, design = ~ trt )
+res <- DESeq(dds)
+z <- results(res)
+vsd <- vst(dds, blind=FALSE)
+zz <- cbind(as.data.frame(z),assay(vsd))
+dge <- as.data.frame(zz[order(zz$pvalue),])
+table(is.na(dge$pvalue))
+dge <- dge[which(!is.na(dge$pvalue)),]
+dim(dge)
+
+head(dge[order(dge$pvalue),1:6],10) %>%
+  kbl(caption="Top DE genes for wMel infection") %>%
+  kable_paper("hover", full_width = F)
+
+volcanoplot(dge,"DGE5")
+
+smearplot(dge,"DGE5")
+
+dge5 <- dge
+
+```
+
+
+## Correlation analysis
+
+```{r,correl1}
+
+xl <- list("d1"=dge1,"d2"=dge2,"d3"=dge3,"d4"=dge4,"d5"=dge5)
+m <- mitch_import(x=xl,DEtype="DEseq2")
+mycor2 <- cor(m)
+heatmap.2( mycor2, scale="none", trace="none",margins = c(6,6), main="Pearson Correlation")
+
+mycor2 %>%
+  kbl(caption="Pearson correlations of contrasts") %>%
+  kable_paper("hover", full_width = F)
+
+
+```
+
+## Set analysis
+
+```{r,set_analysis1}
+
+fdr=0.01
+lfc=0.5
+
+eulerplot <- function(x,y,namex,namey) {
+  xup <- rownames(subset(x,padj<fdr & log2FoldChange>lfc))
+  xdn <- rownames(subset(x,padj<fdr & log2FoldChange<lfc))
+  yup <- rownames(subset(y,padj<fdr & log2FoldChange>lfc))
+  ydn <- rownames(subset(y,padj<fdr & log2FoldChange<lfc))
+  nxup <- paste(namex,"up")
+  nxdn <- paste(namex,"dn")
+  nyup <- paste(namey,"up")
+  nydn <- paste(namey,"dn")
+  v1 <- list(nxup=xup, nxdn=xdn, nyup=yup, nydn=ydn)
+  names(v1) <- c(nxup, nxdn, nyup, nydn)
+  plot(euler(v1),quantities = TRUE)
+}
+
+eulerplot(dge1, dge2, "dge1", "dge2")
+eulerplot(dge1, dge3, "dge1", "dge3")
+eulerplot(dge1, dge4, "dge1", "dge4")
+eulerplot(dge1, dge5, "dge1", "dge5")
+
+eulerplot(dge2, dge3, "dge2", "dge3")
+eulerplot(dge2, dge4, "dge2", "dge4")
+eulerplot(dge2, dge5, "dge2", "dge5")
+
+eulerplot(dge3, dge4, "dge3", "dge4")
+eulerplot(dge3, dge5, "dge3", "dge5")
+
+eulerplot(dge4, dge5, "dge4", "dge5")
+
+jaccardindex <- function(x,y) {
+  xup <- rownames(subset(x,padj<fdr & log2FoldChange>lfc))
+  xdn <- rownames(subset(x,padj<fdr & log2FoldChange<lfc))
+  yup <- rownames(subset(y,padj<fdr & log2FoldChange>lfc))
+  ydn <- rownames(subset(y,padj<fdr & log2FoldChange<lfc))
+  xup <- paste(xup,"up")
+  xdn <- paste(xdn,"up")
+  yup <- paste(yup,"up")
+  ydn <- paste(ydn,"up")
+  xde <- c(xup,xdn)
+  yde <- c(yup,ydn)
+  jac <- length(intersect(xde,yde)) / length(union(xde,yde))
+  return(jac)
+}
+
+jaccardindex(dge1, dge2)
+jaccardindex(dge1, dge3)
+jaccardindex(dge1, dge4)
+jaccardindex(dge1, dge5)
+jaccardindex(dge2, dge3)
+jaccardindex(dge2, dge4)
+jaccardindex(dge2, dge5)
+jaccardindex(dge3, dge4)
+jaccardindex(dge3, dge5)
+jaccardindex(dge4, dge5)
+
+```
+
+## Select genes specific to antiviral infection
+
+Here we'll make the following comparisons:
+
+1. Tet (ctrl) vs wPip (trt): effect of infection (no antiviral activity)
+
+2. Tet (ctrl) vs wMel (trt): effect of infection with an antiviral strain
+
+3. Tet (ctrl) vs wAlb (trt): effect of infection with an antiviral strain
+
+4. wPip (ctrl) vs wMel (trt): direct comparison of non-antiviral and antiviral
+
+5. wPip (ctrl) vs wAlb (trt): direct comparison of non-antiviral and antiviral
+
+Will get those common to d4 and d5.
+
+```{r,geneselect1}
+
+
+d1up <- rownames(subset(dge1,padj<fdr & log2FoldChange>lfc))
+d1dn <- rownames(subset(dge1,padj<fdr & log2FoldChange<lfc))
+d2up <- rownames(subset(dge2,padj<fdr & log2FoldChange>lfc))
+d2dn <- rownames(subset(dge2,padj<fdr & log2FoldChange<lfc))
+
+length(intersect(d1up, d2up))
+intersect(d1up, d2up)
+
+length(intersect(d1dn, d2dn))
+intersect(d1dn, d2dn)
+
+```
+
+## Pathway enrichment 1
+
+DGE1, DGE2, DGE3. One non-antiviral and two antiviral bacterium.
+
+```{r,mitch1}
+
+l1 <- list("cvPip"=dge1,"cvMel"=dge2,"cvAlb"=dge3)
+m1 <- mitch_import(x=l1,DEtype="DEseq2")
+head(m1)
+
+mres1 <- mitch_calc(x=m1,genesets=go_sets,minsetsize=5,cores=4,priority="effect")
+dim(mres1$enrichment_result)
+mres1x <- subset(mres1$enrichment_result,p.adjustMANOVA<0.01)
+
+head(mres1x)
+pairs(mres1x[,4:6])
+mres1x$antiviral <- ( mres1x$s.cvMel + mres1x$s.cvAlb ) / 2
+mres1x$SD2 <- apply(mres1x, 1, function(x) { sd(c(x["s.cvPip"] ,x["antiviral"] ) ) } )
+mres1x$diff <- mres1x$antiviral - mres1x$s.cvPip
+head(mres1x)
+mres1x <- mres1x[order(-mres1x$SD2),]
+
+head(mres1x,10) %>%
+  kbl(caption="Top GO terms with altered expression in antiviral strains as compared to wPip") %>%
+  kable_paper("hover", full_width = F)
+
+message("More common for pathways to be upregulated in antiviral strains")
+summary(mres1x$antiviral - mres1x$s.cvPip)
+hist(mres1x$antiviral - mres1x$s.cvPip)
+
+mitch_report(res=mres1,outfile="mitch1_report.html",overwrite=TRUE)
+
+```
+
+Now I will focus on these gene sets and make a detailed report.
+In this report, we are looking at which GO sets are there and which genes, but the FDR values will
+not be correct as we have cherry-picked them based on the above analysis.
+
+```{r,mitch2}
+
+table(names(go_sets) %in% head(mres1x$set,50))
+
+selected_go_sets <- go_sets[which(names(go_sets) %in% head(mres1x$set,50))]
+
+mres2 <- mitch_calc(x=m1,genesets=selected_go_sets,minsetsize=5,cores=4,priority="effect")
+
+mitch_report(res=mres2,outfile="mitch2_report.html",overwrite=TRUE)
+
+```
+
+Make a heatmap of top GO terms.
+
+```{r,goterms,fig.height=8,fig.width=8}
+
+mres2x <- mres2$enrichment_result[,4:6]
+
+rownames(mres2x) <- gsub("_"," ",mres2$enrichment_result$set)
+
+colfunc <- colorRampPalette(c("blue", "white", "red"))
+
+heatmap.2( as.matrix(mres2x), col=colfunc(25), scale="none",
+ trace="none",margins = c(5,20), cexRow=.6, cexCol=.8,
+ main="GO terms of interest")
+
+```
+
+## Session information
+
+For reproducibility.
+
+```{r,session}
+
+sessionInfo()
 
 ```
